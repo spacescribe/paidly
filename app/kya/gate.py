@@ -47,10 +47,19 @@ def check(tool_name: str, tool_input: dict) -> tuple[bool, str]:
     if tool_name == "create_invoice":
         amount = tool_input.get("amount", 0)
         currency = tool_input.get("currency")
-        if amount > limits["max_invoice_amount"]:
-            return False, f"Invoice amount {amount} exceeds limit ({limits['max_invoice_amount']})."
         if currency not in limits["allowed_currencies"]:
             return False, f"Currency {currency} not allowed."
+
+        if currency == "USD":
+            amount_usd = amount
+        else:
+            fx_rate = tool_input.get("fx_rate_to_usd")
+            if not fx_rate:
+                return False, f"Need an exchange rate (fx_rate_to_usd) to validate a {currency} amount against the USD-denominated limit."
+            amount_usd = amount / fx_rate
+
+        if amount_usd > limits["max_invoice_amount"]:
+            return False, f"Invoice amount {amount} {currency} (~{amount_usd:.2f} USD) exceeds limit (${limits['max_invoice_amount']} USD)."
 
     return True, "OK"
 

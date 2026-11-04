@@ -7,20 +7,22 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.3.2/styles/ag-grid.css" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.3.2/styles/ag-theme-quartz.css" />
 <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@31.3.2/dist/ag-grid-community.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.0/dist/purify.min.js"></script>
 <style>
   :root {
-    --bg: #f7f8fa;
-    --panel: #ffffff;
-    --border: #e2e5ea;
-    --text: #1b1f27;
-    --text-muted: #6b7280;
-    --accent: #0a5fc2;
-    --accent-soft: #e8f1fd;
-    --danger: #b3261e;
-    --danger-soft: #fdeceb;
-    --warn: #8a5a00;
-    --ok: #166534;
-    --ok-soft: #eafaf0;
+    --bg: #0d0f13;
+    --panel: #161922;
+    --border: #2a2f3a;
+    --text: #e7e9ee;
+    --text-muted: #9298a6;
+    --accent: #4c8dff;
+    --accent-soft: #1d2a40;
+    --danger: #ff6868;
+    --danger-soft: #3a1c1c;
+    --warn: #e3ac4f;
+    --ok: #4fd68a;
+    --ok-soft: #163322;
     --radius: 8px;
     --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   }
@@ -60,10 +62,18 @@
 
   main {
     display: grid;
-    grid-template-columns: 1fr 1.3fr 0.9fr;
+    grid-template-columns: 1.3fr 1fr;
     gap: 16px;
     padding: 16px;
     height: calc(100vh - 57px);
+  }
+
+  .left-col {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 0;
+    height: 100%;
   }
 
   .panel {
@@ -73,7 +83,11 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0;
   }
+
+  #grid-panel { flex: 3; }
+  #side-panel { flex: 2; }
 
   .panel-header {
     padding: 10px 14px;
@@ -100,8 +114,18 @@
   .msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
   .msg.assistant { align-self: flex-start; background: var(--accent-soft); color: var(--text); }
 
+  .msg.assistant p { margin: 0 0 6px; }
+  .msg.assistant p:last-child { margin-bottom: 0; }
+  .msg.assistant ul, .msg.assistant ol { margin: 4px 0; padding-left: 18px; }
+  .msg.assistant code { background: var(--bg); padding: 1px 4px; border-radius: 4px; font-family: var(--mono); font-size: 11px; }
+  .msg.assistant pre { background: var(--bg); padding: 8px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
+  .msg.assistant pre code { background: none; padding: 0; }
+  .msg.assistant table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 12px; }
+  .msg.assistant th, .msg.assistant td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+  .msg.assistant a { color: var(--accent); }
+
   #chat-input-row { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
-  #chat-input { flex: 1; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 13px; }
+  #chat-input { flex: 1; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 13px; background: var(--panel); color: var(--text); }
 
   button { cursor: pointer; border: none; border-radius: var(--radius); font-size: 13px; font-weight: 500; }
   #chat-input-row button { padding: 8px 16px; background: var(--accent); color: #fff; }
@@ -187,6 +211,80 @@
   .decision.allowed, .decision.approved { color: var(--ok); }
   .decision.queued { color: var(--accent); }
   .decision.denied, .decision.rejected { color: var(--danger); }
+
+  .stat-tile {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    background: var(--ok-soft);
+    border: 1px solid var(--border);
+  }
+  .stat-value { font-size: 22px; font-weight: 700; color: var(--ok); }
+  .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); }
+
+  .passport-card {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    background: linear-gradient(135deg, var(--accent-soft), var(--panel));
+    font-size: 12px;
+    line-height: 1.6;
+    overflow: hidden;
+  }
+  .passport-card.is-revoked { background: linear-gradient(135deg, var(--danger-soft), var(--panel)); }
+  .passport-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .passport-agent-name { font-weight: 700; font-size: 14px; }
+  .passport-ids {
+    display: flex;
+    gap: 12px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--text-muted);
+    letter-spacing: 0.03em;
+    margin-bottom: 6px;
+  }
+  .passport-row { color: var(--text); }
+  .revoked-stamp {
+    position: absolute;
+    top: 14px;
+    right: -22px;
+    background: var(--danger);
+    color: #fff;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    padding: 3px 32px;
+    transform: rotate(32deg);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  }
+
+  .attack-sim-row { display: flex; flex-direction: column; gap: 6px; }
+  .btn-sim { padding: 7px 10px; background: var(--panel); border: 1px solid var(--warn); color: var(--warn); font-size: 11px; }
+  .btn-sim:hover { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+
+  .attack-result-box { font-size: 12px; padding: 8px 10px; border-radius: var(--radius); }
+  .attack-result-box.blocked { background: var(--ok-soft); color: var(--ok); }
+  .attack-result-box.allowed { background: var(--danger-soft); color: var(--danger); }
+
+  .toast {
+    position: fixed;
+    top: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--danger-soft);
+    color: var(--danger);
+    padding: 10px 16px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    display: none;
+    z-index: 1000;
+    max-width: 480px;
+  }
+  .toast.visible { display: block; }
 </style>
 </head>
 <body>
@@ -194,12 +292,52 @@
   <h1>Paidly</h1>
   <div id="status-bar">Loading status...</div>
 </header>
+<div id="toast" class="toast"></div>
 
 <main>
-  <section class="panel" id="grid-panel">
-    <div class="panel-header">Invoices</div>
-    <div id="invoice-grid" class="ag-theme-quartz"></div>
-  </section>
+  <div class="left-col">
+    <section class="panel" id="grid-panel">
+      <div class="panel-header">Invoices</div>
+      <div id="invoice-grid" class="ag-theme-quartz-dark"></div>
+    </section>
+
+    <section class="panel" id="side-panel">
+      <div class="tabs-header">
+        <button class="tab-btn active" data-tab="approvals">Approvals<span id="approvals-badge" class="tab-badge" style="display:none;"></span></button>
+        <button class="tab-btn" data-tab="trace">Trace</button>
+        <button class="tab-btn" data-tab="kya">KYA</button>
+      </div>
+
+      <div class="tab-content active" data-tab-content="approvals">
+        <div id="approvals-list"><div class="empty-state">No pending actions.</div></div>
+      </div>
+
+      <div class="tab-content" data-tab-content="trace">
+        <div id="trace-list"><div class="empty-state">No tool calls yet.</div></div>
+      </div>
+
+      <div class="tab-content" data-tab-content="kya">
+        <div id="kya-stat-tile" class="stat-tile">
+          <span class="stat-value" id="attacks-blocked-count">0</span>
+          <span class="stat-label">Attacks Blocked</span>
+        </div>
+
+        <div id="kya-passport-summary" class="empty-state">Loading passport...</div>
+
+        <div class="kya-revoke-row">
+          <button id="kya-revoke-btn" class="btn-reject">Revoke Passport</button>
+        </div>
+
+        <div class="attack-sim-row">
+          <button id="sim-forged-btn" class="btn-sim">Simulate Forged Signature</button>
+          <button id="sim-overscoped-btn" class="btn-sim">Simulate Over-Scoped Request</button>
+        </div>
+        <div id="attack-result"></div>
+
+        <div id="kya-audit-list"></div>
+      </div>
+    </section>
+  </div>
 
   <section class="panel" id="chat-panel">
     <div class="panel-header">Chat</div>
@@ -214,34 +352,18 @@
       <button id="chat-send">Send</button>
     </div>
   </section>
-
-  <section class="panel" id="side-panel">
-    <div class="tabs-header">
-      <button class="tab-btn active" data-tab="approvals">Approvals<span id="approvals-badge" class="tab-badge" style="display:none;"></span></button>
-      <button class="tab-btn" data-tab="trace">Trace</button>
-      <button class="tab-btn" data-tab="kya">KYA</button>
-    </div>
-
-    <div class="tab-content active" data-tab-content="approvals">
-      <div id="approvals-list"><div class="empty-state">No pending actions.</div></div>
-    </div>
-
-    <div class="tab-content" data-tab-content="trace">
-      <div id="trace-list"><div class="empty-state">No tool calls yet.</div></div>
-    </div>
-
-    <div class="tab-content" data-tab-content="kya">
-      <div class="kya-revoke-row">
-        <button id="kya-revoke-btn" class="btn-reject">Revoke Passport</button>
-      </div>
-      <div id="kya-passport-summary" class="empty-state">Loading passport...</div>
-      <div id="kya-audit-list"></div>
-    </div>
-  </section>
 </main>
 
 <script>
 const chatMessagesEl = document.getElementById('chat-messages');
+const toastEl = document.getElementById('toast');
+let toastTimer;
+function showToast(message) {
+  toastEl.textContent = message;
+  toastEl.classList.add('visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('visible'), 5000);
+}
 const approvalsListEl = document.getElementById('approvals-list');
 const traceListEl = document.getElementById('trace-list');
 const statusBarEl = document.getElementById('status-bar');
@@ -296,17 +418,35 @@ function renderPassport(record) {
     return;
   }
   const p = record.payload;
-  const expires = new Date(p.exp * 1000).toLocaleString();
+  const expires = new Date(p.exp * 1000);
+  const daysLeft = Math.max(0, Math.round((expires - Date.now()) / 86400000));
+  const shortAgent = p.agent_id.slice(0, 8);
+  const shortPassport = p.passport_id.slice(0, 8);
   kyaPassportEl.innerHTML = `
-    <div><span class="badge ${record.revoked ? 'revoked' : 'active'}">${record.revoked ? 'REVOKED' : 'ACTIVE'}</span> ${p.agent_name}</div>
-    <div>Owner: ${p.owner}</div>
-    <div>Expires: ${expires}</div>
-    <div>Limits: ${p.limits.max_reminders_per_day}/day reminders, max ${p.limits.max_invoice_amount} ${p.limits.allowed_currencies.join('/')}</div>
-    <div class="kya-scopes">${p.scopes.map(s => `<span class="kya-scope-tag">${s}</span>`).join('')}</div>
+    <div class="passport-card ${record.revoked ? 'is-revoked' : ''}">
+      ${record.revoked ? '<div class="revoked-stamp">REVOKED</div>' : ''}
+      <div class="passport-card-header">
+        <div class="passport-agent-name">${p.agent_name}</div>
+        <span class="badge ${record.revoked ? 'revoked' : 'active'}">${record.revoked ? 'REVOKED' : 'ACTIVE'}</span>
+      </div>
+      <div class="passport-ids">
+        <span>AGENT &bull;&bull; ${shortAgent}</span>
+        <span>PASSPORT &bull;&bull; ${shortPassport}</span>
+      </div>
+      <div class="passport-row">Owner: ${p.owner}</div>
+      <div class="passport-row">${record.revoked ? 'Revoked' : `Expires in ${daysLeft} days`} (${expires.toLocaleDateString()})</div>
+      <div class="passport-row">Limits: ${p.limits.max_reminders_per_day}/day reminders, max ${p.limits.max_invoice_amount} ${p.limits.allowed_currencies.join('/')}</div>
+      <div class="kya-scopes">${p.scopes.map(s => `<span class="kya-scope-tag">${s}</span>`).join('')}</div>
+    </div>
   `;
 }
 
+const attacksBlockedEl = document.getElementById('attacks-blocked-count');
+
 function renderAudit(entries) {
+  const attacksBlocked = entries.filter(e => e.decision === 'denied' && e.tool && e.tool.startsWith('a2a:'));
+  attacksBlockedEl.textContent = attacksBlocked.length;
+
   if (!entries.length) {
     kyaAuditEl.innerHTML = '<div class="empty-state">No audit entries yet.</div>';
     return;
@@ -331,6 +471,18 @@ document.getElementById('kya-revoke-btn').addEventListener('click', async () => 
   await fetch('/api/kya/revoke', { method: 'POST' });
   await refreshKya();
 });
+
+const attackResultEl = document.getElementById('attack-result');
+
+async function simulateAttack(scenario) {
+  const res = await fetch(`/api/kya/simulate-attack?scenario=${scenario}`, { method: 'POST' });
+  const data = await res.json();
+  attackResultEl.innerHTML = `<div class="attack-result-box ${data.blocked ? 'blocked' : 'allowed'}">${data.blocked ? 'Blocked' : 'Allowed'}: ${data.reason}</div>`;
+  await refreshKya();
+}
+
+document.getElementById('sim-forged-btn').addEventListener('click', () => simulateAttack('forged'));
+document.getElementById('sim-overscoped-btn').addEventListener('click', () => simulateAttack('over-scoped'));
 
 const approvalsBadgeEl = document.getElementById('approvals-badge');
 
@@ -367,7 +519,11 @@ approvalsListEl.addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-action]');
   if (!btn) return;
   const { action, id } = btn.dataset;
-  await fetch(`/api/${action}/${id}`, { method: 'POST' });
+  const res = await fetch(`/api/${action}/${id}`, { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    showToast(`Failed to ${action}: ${err.detail || res.statusText}`);
+  }
   await refreshPending();
   await refreshInvoices();
   await refreshKya();
@@ -376,7 +532,11 @@ approvalsListEl.addEventListener('click', async (e) => {
 function appendMessage(role, text) {
   const div = document.createElement('div');
   div.className = `msg ${role}`;
-  div.textContent = text;
+  if (role === 'assistant') {
+    div.innerHTML = DOMPurify.sanitize(marked.parse(text));
+  } else {
+    div.textContent = text;
+  }
   chatMessagesEl.appendChild(div);
   chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
 }
@@ -401,6 +561,11 @@ async function sendChat(text) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message: text }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    showToast(`Chat failed: ${err.detail || res.statusText}`);
+    return;
+  }
   const data = await res.json();
   appendMessage('assistant', data.reply);
   renderTrace(data.tool_trace);

@@ -62,6 +62,14 @@ TOOLS = [
                 "recipient_name": {"type": "string"},
                 "amount": {"type": "number"},
                 "currency": {"type": "string"},
+                "fx_rate_to_usd": {
+                    "type": "number",
+                    "description": (
+                        "Units of the invoice currency equal to 1 USD (e.g. 83 for INR if 1 USD = 83 INR). "
+                        "Required when currency is not USD, so the KYA gate can validate the amount against "
+                        "its USD-denominated limit. Ask the user for this rate if they haven't given one."
+                    ),
+                },
                 "due_date": {"type": "string", "description": "YYYY-MM-DD"},
             },
             "required": ["recipient_email", "recipient_name", "amount", "currency", "due_date"],
@@ -219,7 +227,6 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> tuple[dict, Optiona
             "message": "This action requires human approval before it will run.",
         }, approval_id
     raise ValueError(f"Unknown tool: {tool_name}")
-
 
 async def chat(messages: list[dict], user_message: str) -> dict:
     messages.append({"role": "user", "content": user_message})

@@ -31,7 +31,7 @@ async def get_access_token() ->str:
             data = {"grant_type": "client_credentials"},
             auth = (PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET)
         )
-        resp.raise_for_status()
+        _raise_for_status(resp)
         data = resp.json()
 
     _token_cache["access_token"] = data["access_token"]
@@ -41,6 +41,11 @@ async def get_access_token() ->str:
 async def _auth_headers() -> dict:
     token = await get_access_token()
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+def _raise_for_status(resp: httpx.Response) -> None:
+    if resp.status_code >= 400:
+        logger.error("PayPal API error %s: %s", resp.status_code, resp.text)
+    resp.raise_for_status()
 
 _mock_invoices = {
     "INV-1001": {
@@ -98,8 +103,8 @@ async def list_invoices() -> list[dict]:
     headers = await _auth_headers()
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{PAYPAL_API_BASE}/v2/invoicing/invoices", headers=headers)
-        resp.raise_for_status()
-        return resp.json().get("items", [])
+        _raise_for_status(resp)
+        return [_normalize_invoice(item) for item in resp.json().get("items", [])]
 
 
 async def create_invoice(
@@ -126,12 +131,19 @@ async def create_invoice(
         _mock_invoices[new_id] = invoice
         return invoice
 
+    name_parts = recipient_name.strip().split(" ", 1)
+    given_name = name_parts[0]
+    surname = name_parts[1] if len(name_parts) > 1 else ""
+
     headers = await _auth_headers()
     payload = {
-        "detail": {"currency_code": currency, "due_date": due_date},
+        "detail": {
+            "currency_code": currency,
+            "payment_term": {"term_type": "DUE_ON_DATE_SPECIFIED", "due_date": due_date},
+        },
         "invoicer": {},
         "primary_recipients": [
-            {"billing_info": {"email_address": recipient_email, "name": {"full_name": recipient_name}}}
+            {"billing_info": {"email_address": recipient_email, "name": {"given_name": given_name, "surname": surname}}}
         ],
         "items": items or [
             {"name": "Services rendered", "quantity": "1", "unit_amount": {"currency_code": currency, "value": str(amount)}}
@@ -139,8 +151,8 @@ async def create_invoice(
     }
     async with httpx.AsyncClient() as client:
         resp = await client.post(f"{PAYPAL_API_BASE}/v2/invoicing/invoices", headers=headers, json=payload)
-        resp.raise_for_status()
-        return resp.json()
+        _raise_for_status(resp)
+        return _normalize_invoice(resp.json())
 
 
 async def send_invoice(invoice_id: str) -> dict:
@@ -155,7 +167,7 @@ async def send_invoice(invoice_id: str) -> dict:
     headers = await _auth_headers()
     async with httpx.AsyncClient() as client:
         resp = await client.post(f"{PAYPAL_API_BASE}/v2/invoicing/invoices/{invoice_id}/send", headers=headers)
-        resp.raise_for_status()
+        _raise_for_status(resp)
         return {"id": invoice_id, "status": "SENT"}
 
 
@@ -171,7 +183,7 @@ async def send_reminder(invoice_id: str) -> dict:
     headers = await _auth_headers()
     async with httpx.AsyncClient() as client:
         resp = await client.post(f"{PAYPAL_API_BASE}/v2/invoicing/invoices/{invoice_id}/remind", headers=headers)
-        resp.raise_for_status()
+        _raise_for_status(resp)
         return {"id": invoice_id, "reminder_sent": True}
 
 
@@ -183,7 +195,7 @@ async def list_disputes() -> list[dict]:
     headers = await _auth_headers()
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{PAYPAL_API_BASE}/v1/customer/disputes", headers=headers)
-        resp.raise_for_status()
+        _raise_for_status(resp)
         return resp.json().get("items", [])
 
 
@@ -198,7 +210,7 @@ async def get_dispute(dispute_id: str) -> dict:
     headers = await _auth_headers()
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{PAYPAL_API_BASE}/v1/customer/disputes/{dispute_id}", headers=headers)
-        resp.raise_for_status()
+        _raise_for_status(resp)
         return resp.json()
 
 async def delete_invoice(invoice_id: str) -> dict:
@@ -215,7 +227,7 @@ async def delete_invoice(invoice_id: str) -> dict:
     headers = await _auth_headers()
     async with httpx.AsyncClient() as client:
         resp = await client.delete(f"{PAYPAL_API_BASE}/v2/invoicing/invoices/{invoice_id}", headers=headers)
-        resp.raise_for_status()
+        _raise_for_status(resp)
         return {"id": invoice_id, "deleted": True}
 
 async def cancel_invoice(invoice_id: str, note: str = "") -> dict:
@@ -243,5 +255,31 @@ async def cancel_invoice(invoice_id: str, note: str = "") -> dict:
             headers=headers,
             json = payload
         )
-        resp.raise_for_status()
+        _raise_for_status(resp)
         return {"id": invoice_id, "status": "CANCELLED"}
+
+def _normalize_invoice(raw: dict) -> dict:
+    detail = raw.get("detail", {})
+    recipients = raw.get("primary_recipients", [])
+    billing_info = recipients[0].get("billing_info", {}) if recipients else {}
+    name_obj = billing_info.get("name", {})
+    recipient_name = (
+        name_obj.get("full_name")
+        or " ".join(filter(None, [name_obj.get("given_name"), name_obj.get("surname")]))
+        or billing_info.get("email_address", "Unknown")
+    )
+
+    amount = raw.get("amount", {})
+    due_date = detail.get("payment_term", {}).get("due_date") or detail.get("invoice_date")
+
+    return {
+        "id": raw.get("id"),
+        "recipient_email": billing_info.get("email_address"),
+        "recipient_name": recipient_name,
+        "amount": float(amount.get("value", 0)),
+        "currency": amount.get("currency_code"),
+        "due_date": due_date,
+        "status": raw.get("status"),
+        "reminders_sent": 0,
+    }
+

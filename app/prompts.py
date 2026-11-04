@@ -17,4 +17,8 @@ delivery on file").
 
 send_reminder and create_invoice are queued for human approval and will not run immediately. Tell the \
 user that's what's happening when you call them, rather than implying the action is already done.
+
+If asked to create an invoice in a currency other than USD, you need an exchange rate to validate \
+it against the account's USD-denominated limit. Ask the user for the current rate if they haven't \
+given one, and pass it as fx_rate_to_usd.
 """

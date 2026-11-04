@@ -5,6 +5,7 @@ configure_logging()
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+import httpx
 
 from app import agent, paypal
 from app.kya import audit, passport
@@ -53,6 +54,8 @@ async def approve(approval_id: str):
         return await agent.resolve_approval(approval_id, approve=True)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"PayPal API error: {e.response.text}")
 
 @app.post("/api/reject/{approval_id}")
 async def reject(approval_id: str):
@@ -97,7 +100,7 @@ async def a2a_pay_intent(request: A2ARequest):
     allowed, reason = a2a_registry.verify_incoming_passport(request.passport, "payments:intent")
     payload = request.passport.get("payload", {})
     agent_id = payload.get("agent_id", "unknown")
-    decision = "accepted" if allowed else "rejected"
+    decision = "accepted" if allowed else "denied"
     audit.log_entry(agent_id, payload.get("passport_id", "n/a"), "a2a:pay-intent", request.action_input, decision, reason)
     if not allowed:
         raise HTTPException(status_code=403, detail=reason)
@@ -108,12 +111,22 @@ async def a2a_dispute_response(request: A2ARequest):
     allowed, reason = a2a_registry.verify_incoming_passport(request.passport, "disputes:respond")
     payload = request.passport.get("payload", {})
     agent_id = payload.get("agent_id", "unknown")
-    decision = "accepted" if allowed else "rejected"
+    decision = "accepted" if allowed else "denied"
     audit.log_entry(agent_id, payload.get("passport_id", "n/a"), "a2a:dispute-response", request.action_input, decision, reason)
     logger.info("A2A dispute-response from %s: %s (%s)", agent_id, decision, reason)
     if not allowed:
         raise HTTPException(status_code=403, detail=reason)
     return {"status": "accepted", "reason": reason, "action_input": request.action_input}
+
+@app.post("/api/kya/simulate-attack")
+async def simulate_attack(scenario: str):
+    passport, required_scope = a2a_registry.build_demo_attack_passport(scenario)
+    allowed, reason = a2a_registry.verify_incoming_passport(passport, required_scope)
+    payload = passport["payload"]
+    audit.log_entry(payload["agent_id"], payload["passport_id"], f"a2a:simulate-{scenario}", {}, "denied", reason)
+    logger.info("Simulated attack (%s): %s", scenario, reason)
+    return {"scenario": scenario, "blocked": not allowed, "reason": reason}
+
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 

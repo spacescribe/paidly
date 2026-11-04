@@ -3,6 +3,7 @@ import hmac
 import json
 import logging
 import time
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +14,26 @@ TRUSTED_AGENTS = {
         "trusted_scopes": ["payments:intent"]
     }
 }
+
+DEMO_AGENT_ID = "client-payer-agent-001"
+
+def build_demo_attack_passport(scenario: str) -> tuple[dict, str]:
+    agent = TRUSTED_AGENTS[DEMO_AGENT_ID]
+    payload = {
+        "passport_id": str(uuid.uuid4()),
+        "agent_id": DEMO_AGENT_ID,
+        "agent_name": agent["name"],
+        "owner": "demo-client",
+        "iat": time.time(), 
+        "exp": time.time() + 3600,
+    }
+    if scenario == "forged":
+        signature = _sign(payload, "wrong-secret-trying-to-impersonate")
+        return {"payload": payload, "signature": signature}, "payments:intent"
+    if scenario == "over-scoped":
+        signature = _sign(payload, agent["shared_secret"])
+        return {"payload": payload, "signature": signature}, "disputes:respond"
+    raise ValueError(f"Unknown attack scenario: {scenario}")
 
 def _sign(payload: dict, secret: str) -> str:
     payload_json = json.dumps(payload, sort_keys=True)
