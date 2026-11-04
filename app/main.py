@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import agent, paypal
+from app.kya import audit, passport
 
 app = FastAPI(title="Dunning Copilot")
 import logging
@@ -58,6 +59,34 @@ async def reject(approval_id: str):
         return await agent.resolve_approval(approval_id, approve=False)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/kya/passport")
+async def get_kya_passport():
+    return passport.load_passport()
+
+@app.get("/api/kya/audit")
+async def get_kya_audit():
+    return audit.list_audit()
+
+@app.post("/api/kya/revoke")
+async def revoke_kya_passport():
+    return passport.revoke_passport()
+
+@app.get("/.well-known/agent-passport.json")
+async def well_known_agent_passport():
+    record = passport.load_passport()
+    if record is None:
+        raise HTTPException(status_code=404, detail="No passport issued")
+    return {
+        **record,
+        "note": (
+            "Signed with a symmetric HMAC key held by the issuing server. This confirms "
+            "the server's own record hasn't been tampered with locally; it is not "
+            "independently verifiable by third parties the way an asymmetric "
+            "public-key signature would be."
+        ),
+    }
+
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 

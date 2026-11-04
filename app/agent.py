@@ -5,6 +5,7 @@ from typing import Optional
 
 from app import paypal, providers
 from app.prompts import SYSTEM_PROMPT
+from app.kya import audit, gate, passport
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +67,55 @@ TOOLS = [
             "required": ["recipient_email", "recipient_name", "amount", "currency", "due_date"],
         },
     },
+        {
+        "name": "send_invoice",
+        "description": (
+            "Send a draft invoice to the recipient. This is queued for human approval "
+            "and is not sent immediately."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"invoice_id": {"type": "string"}},
+            "required": ["invoice_id"],
+        },
+    },
+    {
+        "name": "delete_invoice",
+        "description": (
+            "Permanently delete a draft invoice that has not been sent yet. This is queued "
+            "for human approval. Only works on invoices in DRAFT status."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"invoice_id": {"type": "string"}},
+            "required": ["invoice_id"],
+        },
+    },
+    {
+        "name": "cancel_invoice",
+        "description": (
+            "Cancel an invoice that has already been sent, notifying the recipient. This is "
+            "queued for human approval. Does not work on invoices still in DRAFT status."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "invoice_id": {"type": "string"},
+                "note": {"type": "string", "description": "Optional note explaining the cancellation."},
+            },
+            "required": ["invoice_id"],
+        },
+    },
 ]
 
+PASSPORT = passport.get_or_create_passport(TOOLS)
+AGENT_ID = PASSPORT["payload"]["agent_id"]
+PASSPORT_ID =  PASSPORT["payload"]["passport_id"]
+logger.info("KYA passport loaded: %s", PASSPORT_ID)
+
+
 READ_TOOLS = {"list_invoices", "list_disputes", "get_dispute"}
-WRITE_TOOLS = {"send_reminder", "create_invoice"}
+WRITE_TOOLS = {"send_reminder", "create_invoice", "send_invoice", "delete_invoice", "cancel_invoice"}
 
 _pending_approvals: dict[str, dict] = {}
 
@@ -96,34 +142,68 @@ async def resolve_approval(approval_id: str, approve: bool) -> dict:
     if approval["status"] != "pending":
         raise ValueError(f"Approval {approval_id} already {approval['status']}")
 
+    tool_name = approval["tool_name"]
+    tool_input = approval["tool_input"]
+
     if not approve:
         approval["status"] = "rejected"
+        audit.log_entry(AGENT_ID, PASSPORT_ID, tool_name, tool_input, "rejected", "Rejected by human", approving_human="human")
         logger.info("Approval %s rejected (tool=%s)", approval_id, approval["tool_name"])
         return approval
 
-    tool_name = approval["tool_name"]
-    tool_input = approval["tool_input"]
-    if tool_name == "send_reminder":
-        result = await paypal.send_reminder(tool_input["invoice_id"])
-    elif tool_name == "create_invoice":
-        result = await paypal.create_invoice(
-            recipient_email=tool_input["recipient_email"],
-            recipient_name=tool_input["recipient_name"],
-            amount=tool_input["amount"],
-            currency=tool_input["currency"],
-            due_date=tool_input["due_date"],
-        )
-    else:
-        raise ValueError(f"Unknown tool for approval: {tool_name}")
+    allowed, reason = gate.check(tool_name, tool_input)
+    if not allowed:
+        approval["status"] = "denied"
+        audit.log_entry(AGENT_ID, PASSPORT_ID, tool_name, tool_input, "denied", reason, approving_human="human")
+        logger.warning("Approval %s denied at approval time (tool=%s): %s", approval_id, tool_name, reason)
+        return approval
 
+    approval["status"] = "processing"
+    
+    try:
+        if tool_name == "send_reminder":
+            result = await paypal.send_reminder(tool_input["invoice_id"])
+        elif tool_name == "create_invoice":
+            result = await paypal.create_invoice(
+                recipient_email=tool_input["recipient_email"],
+                recipient_name=tool_input["recipient_name"],
+                amount=tool_input["amount"],
+                currency=tool_input["currency"],
+                due_date=tool_input["due_date"],
+            )
+        elif tool_name == "send_invoice":
+            result = await paypal.send_invoice(tool_input["invoice_id"])
+        elif tool_name == "delete_invoice":
+            result = await paypal.delete_invoice(tool_input["invoice_id"])
+        elif tool_name == "cancel_invoice":
+            result = await paypal.cancel_invoice(tool_input["invoice_id"], tool_input.get("note", ""))
+        else:
+            raise ValueError(f"Unknown tool for approval: {tool_name}")
+
+    except Exception:
+        approval["status"] = "pending"
+        raise
+
+    gate.record_execution(tool_name)
     approval["status"] = "approved"
     approval["result"] = result
+    audit.log_entry(AGENT_ID, PASSPORT_ID, tool_name, tool_input, "approved", "Approved and executed", approving_human="human")
     logger.info("Approval %s approved and executed (tool=%s)", approval_id, tool_name)
     return approval
 
 
 async def _execute_tool(tool_name: str, tool_input: dict) -> tuple[dict, Optional[str]]:
     logger.info("Executing tool: %s(%s)", tool_name, tool_input)
+
+    allowed, reason = gate.check(tool_name, tool_input)
+    if not allowed: 
+        audit.log_entry(AGENT_ID, PASSPORT_ID, tool_name, tool_input, "denied", reason)
+        logger.warning("KYA denied %s: %s", tool_name, reason)
+        return {"error": f"KYA denied: {reason}"}, None
+
+    decision = "queued" if tool_name in WRITE_TOOLS else "allowed"
+    audit.log_entry(AGENT_ID, PASSPORT_ID, tool_name, tool_input, decision, reason)
+
     if tool_name == "list_invoices":
         return {"invoices": await paypal.list_invoices()}, None
     if tool_name == "list_disputes":

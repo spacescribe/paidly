@@ -200,3 +200,48 @@ async def get_dispute(dispute_id: str) -> dict:
         resp = await client.get(f"{PAYPAL_API_BASE}/v1/customer/disputes/{dispute_id}", headers=headers)
         resp.raise_for_status()
         return resp.json()
+
+async def delete_invoice(invoice_id: str) -> dict:
+    logger.info("delete_invoice called for %s", invoice_id)
+    if MOCK_MODE:
+        invoice = _mock_invoices.get(invoice_id)
+        if not invoice:
+            raise ValueError(f"Unknown invoice: {invoice_id}")
+        if invoice["status"]!= "DRAFT":
+            raise ValueError(f"Cannot delete invoice {invoice_id}:  not in DRAFT status (status={invoice['status']})")
+        del _mock_invoices[invoice_id]
+        return {"id": invoice_id, "deleted": True}
+
+    headers = await _auth_headers()
+    async with httpx.AsyncClient() as client:
+        resp = await client.delete(f"{PAYPAL_API_BASE}/v2/invoicing/invoices/{invoice_id}", headers=headers)
+        resp.raise_for_status()
+        return {"id": invoice_id, "deleted": True}
+
+async def cancel_invoice(invoice_id: str, note: str = "") -> dict:
+    logger.info("cancel_invoice called for %s", invoice_id)
+    if MOCK_MODE:
+        invoice = _mock_invoices.get(invoice_id)
+        if not invoice:
+            raise ValueError(f"Unknown invoice: {invoice_id}")
+        if invoice["status"] == "DRAFT":
+            raise ValueError(f"Cannot cancel invoice {invoice_id}: it's still a draft, delete it instead")
+        invoice["status"] = "CANCELLED"
+        return invoice
+
+    headers = await _auth_headers()
+    payload = {
+        "subject": "Invoice cancelled",
+        "note": note or "This invoice has been cancelled",
+        "send_to_invoicer": True,
+        "send_to_recipient": True,
+    }
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{PAYPAL_API_BASE}/v2/invoicing/invoices/{invoice_id}/cancel",
+            headers=headers,
+            json = payload
+        )
+        resp.raise_for_status()
+        return {"id": invoice_id, "status": "CANCELLED"}
