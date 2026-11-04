@@ -10,7 +10,7 @@ from app import agent, paypal
 from app.kya import audit, passport
 from app.a2a import registry as a2a_registry
 
-app = FastAPI(title="Dunning Copilot")
+app = FastAPI(title="Paidly")
 import logging
 
 logger = logging.getLogger(__name__)

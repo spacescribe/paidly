@@ -11,7 +11,7 @@ KYA_DIR = ".kya"
 SECRET_KEY_FILE = os.path.join(KYA_DIR, "secret.key")
 PASSPORT_FILE = os.path.join(KYA_DIR, "passport.json")
 
-AGENT_NAME = "dunning-copilot"
+AGENT_NAME = "paidly"
 OWNER = os.getenv("KYA_OWNER", "demo-owner")
 SCOPES = [
     "invoices:read",
