@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app import agent, paypal
 from app.kya import audit, passport
+from app.a2a import registry as a2a_registry
 
 app = FastAPI(title="Dunning Copilot")
 import logging
@@ -87,6 +88,32 @@ async def well_known_agent_passport():
         ),
     }
 
+class A2ARequest(BaseModel):
+    passport: dict
+    action_input: dict
+
+@app.post("/a2a/pay-intent")
+async def a2a_pay_intent(request: A2ARequest):
+    allowed, reason = a2a_registry.verify_incoming_passport(request.passport, "payments:intent")
+    payload = request.passport.get("payload", {})
+    agent_id = payload.get("agent_id", "unknown")
+    decision = "accepted" if allowed else "rejected"
+    audit.log_entry(agent_id, payload.get("passport_id", "n/a"), "a2a:pay-intent", request.action_input, decision, reason)
+    if not allowed:
+        raise HTTPException(status_code=403, detail=reason)
+    return {"status": "accepted", "reason": reason, "action_input": request.action_input}
+
+@app.post("/a2a/dispute-response")
+async def a2a_dispute_response(request: A2ARequest):
+    allowed, reason = a2a_registry.verify_incoming_passport(request.passport, "disputes:respond")
+    payload = request.passport.get("payload", {})
+    agent_id = payload.get("agent_id", "unknown")
+    decision = "accepted" if allowed else "rejected"
+    audit.log_entry(agent_id, payload.get("passport_id", "n/a"), "a2a:dispute-response", request.action_input, decision, reason)
+    logger.info("A2A dispute-response from %s: %s (%s)", agent_id, decision, reason)
+    if not allowed:
+        raise HTTPException(status_code=403, detail=reason)
+    return {"status": "accepted", "reason": reason, "action_input": request.action_input}
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
